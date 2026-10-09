@@ -1,0 +1,58 @@
+{
+  "_readme": [
+    "Copy this file to <sitename>.json and fill it in. Files whose name starts with _ are ignored by the profile loader.",
+    "A profile is auto-selected when one of this machine's IPv4 addresses falls inside one of lanSubnets, so a technician who has never seen the site can just run the tool.",
+    "Every field is optional except 'site'. A partial profile is still useful - the tool reports what is missing rather than failing."
+  ],
+
+  "site": "SITE NAME",
+  "description": "One line: what this site is and who uses it.",
+
+  "lanSubnets": ["10.0.0.0/24"],
+  "_lanSubnets": "CIDR only. Used to auto-select this profile and to judge whether a next hop is on-link.",
+
+  "gateway": "10.0.0.1",
+  "_gateway": "The LAN-side default gateway. Leave blank to use whatever the machine is currently configured with.",
+
+  "transport": {
+    "type": "IPsec | SD-WAN | MPLS | vendor-managed",
+    "nextHop": "",
+    "handoffInterface": "",
+    "dmzIp": "",
+    "_note": "nextHop is the far side of the handoff to the inter-site transport. Setting it lets the tool test the handoff separately from the target, which is what separates 'our link is broken' from 'their host is broken'. Confirm the ACTUAL data path - do not assume it is the tunnel you know about."
+  },
+
+  "knownNat": [
+    {
+      "rule": "",
+      "from": "",
+      "to": "",
+      "note": "Source NAT cannot be observed from an endpoint. Recording it here is what lets the tool tell you which address the far end must have a return route for."
+    }
+  ],
+
+  "targets": [
+    {
+      "name": "Application server",
+      "ip": "",
+      "ports": [443],
+      "peer": "",
+      "_peer": "ANOTHER host on the same subnet as this target that is known to answer. This is the single highest-value field in the file: it is what separates a broken transport from a single broken host."
+    }
+  ],
+
+  "firewall": {
+    "vendor": "",
+    "model": "",
+    "os": "",
+    "mgmtUrl": "",
+    "consoleNote": ""
+  },
+
+  "demarcation": "Where your responsibility ends and the vendor's begins.",
+  "lastKnownGood": "",
+  "vendorContacts": [
+    { "name": "", "company": "", "email": "", "phone": "", "ref": "" }
+  ],
+  "notes": []
+}

@@ -1,0 +1,11 @@
+# Everything the tool saves describes a real network: addresses, MACs, names.
+# Keep it out of any repository.
+inventory/
+baselines/
+build/
+*.json
+!profiles/_template.json
+
+# Your own site profiles hold your clients' networks.
+profiles/*
+!profiles/_template.json
