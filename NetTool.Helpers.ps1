@@ -1,4 +1,6 @@
-﻿<#
+﻿# NetTool 1.0.1 - https://ihavenoram.com - https://github.com/ihavenoram/nettool
+# MIT licence, (c) 2026 ihavenoram.com. If you publish something built on this, please credit ihavenoram.com.
+<#
 .SYNOPSIS
     All-in-one network troubleshooting toolkit - shared logic.
 
@@ -1656,6 +1658,138 @@ function Get-NtMacCollisions {
     return $collisions
 }
 
+function Get-NtOuiRegistrySources {
+    # The IEEE assignment registries. Downloading these once removes the
+    # per-prefix rate limit that made vendor naming the slowest part of a sweep.
+    # Note oui36/oas.csv is a 404 - the MA-S file is oui36.csv.
+    return @(
+        @{ Reg = 'MA-L'; Url = 'https://standards-oui.ieee.org/oui/oui.csv' }
+        @{ Reg = 'MA-M'; Url = 'https://standards-oui.ieee.org/oui28/mam.csv' }
+        @{ Reg = 'MA-S'; Url = 'https://standards-oui.ieee.org/oui36/oui36.csv' }
+        @{ Reg = 'IAB';  Url = 'https://standards-oui.ieee.org/iab/iab.csv' }
+    )
+}
+
+function Get-NtOuiTablePath {
+    return (Join-Path (Get-NtDataDir) 'ieee-oui.txt')
+}
+
+function Get-NtOuiTableAgeDays {
+    # -1 when the IEEE data has never been downloaded.
+    param()
+    $p = Get-NtOuiTablePath
+    if (-not (Test-Path -LiteralPath $p)) { return -1 }
+    try { return [int]((Get-Date) - (Get-Item -LiteralPath $p).LastWriteTime).TotalDays } catch { return -1 }
+}
+
+function Update-NtOuiTable {
+    # Fetches the IEEE registries and writes one flat prefix<TAB>org file.
+    # Returns a result object; a PARTIAL download must be reported as partial
+    # rather than looking like a clean success.
+    param($Progress = $null, $Shared = $null, [int]$TimeoutSec = 120)
+    $out = [pscustomobject]@{ Ok = $false; Count = 0; Errors = @(); Path = (Get-NtOuiTablePath) }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $lines  = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($src in (Get-NtOuiRegistrySources)) {
+        if ($Shared -and $Shared.Cancel) { [void]$errors.Add('cancelled'); break }
+        if ($Progress) { & $Progress ('Downloading {0}...' -f $src.Reg) }
+        $body = ''
+        try {
+            $req = [System.Net.HttpWebRequest]::Create($src.Url)
+            $req.Method = 'GET'
+            $req.Timeout = $TimeoutSec * 1000
+            $req.UserAgent = 'NetTool/1.0'
+            $resp = $req.GetResponse()
+            $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+            $body = $sr.ReadToEnd()
+            $sr.Close(); $resp.Close()
+        } catch {
+            [void]$errors.Add(('{0}: {1}' -f $src.Reg, $_.Exception.Message))
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($body)) { [void]$errors.Add(('{0}: empty response' -f $src.Reg)); continue }
+        if ($Progress) { & $Progress ('Parsing {0}...' -f $src.Reg) }
+        try {
+            # ConvertFrom-Csv, not a regex: organisation names contain commas
+            # and are quoted.
+            $rows = $body | ConvertFrom-Csv
+            foreach ($row in $rows) {
+                $assign = [string]$row.Assignment
+                if (-not $assign) { continue }
+                $assign = (($assign -replace '[^0-9A-Fa-f]', '').ToUpper())
+                if (-not $assign) { continue }
+                $org = [string]$row.'Organization Name'
+                if (-not $org) { $org = 'Unnamed registrant' }
+                # Double quotes: `t is only an escape in a double-quoted string.
+                [void]$lines.Add(("{0}`t{1}" -f $assign, $org.Trim()))
+            }
+        } catch {
+            [void]$errors.Add(('{0}: parse failed - {1}' -f $src.Reg, $_.Exception.Message))
+        }
+    }
+
+    $out.Errors = @($errors.ToArray())
+    if (@($lines).Count -eq 0) { return $out }
+    try {
+        if ($Progress) { & $Progress 'Writing OUI table...' }
+        Set-Content -LiteralPath (Get-NtOuiTablePath) -Value $lines.ToArray() -Encoding UTF8 -ErrorAction Stop
+        $out.Ok = $true
+        $out.Count = @($lines).Count
+        $script:NtOuiTable = $null   # force a reload next time it is asked for
+    } catch {
+        [void]$errors.Add(('write failed - {0}' -f $_.Exception.Message))
+        $out.Errors = @($errors.ToArray())
+    }
+    return $out
+}
+
+function Get-NtOuiTable {
+    # Loads the flat IEEE file into a prefix -> organisation hashtable, ONCE per
+    # runspace. Get-NtOuiVendor is called several times per sweep and the table
+    # is ~59k rows, so reloading it each call would cost more than the lookups
+    # save. Returns $null when the data has not been downloaded, which is the
+    # signal to fall back to the online path.
+    param()
+    if ($script:NtOuiTable) { return $script:NtOuiTable }
+    $p = Get-NtOuiTablePath
+    if (-not (Test-Path -LiteralPath $p)) { return $null }
+    $t = @{}
+    try {
+        foreach ($line in [System.IO.File]::ReadAllLines($p)) {
+            if (-not $line) { continue }
+            $parts = $line -split "`t", 2
+            if (@($parts).Count -lt 2) { continue }
+            if (-not $t.ContainsKey($parts[0])) { $t[$parts[0]] = $parts[1] }
+        }
+    } catch { return $null }
+    if ($t.Count -eq 0) { return $null }
+    $script:NtOuiTable = $t
+    return $t
+}
+
+function Get-NtMacKind {
+    # Broadcast / multicast / locally-administered classification. None of these
+    # have a manufacturer to find, and reporting them as "Unknown" sends someone
+    # looking for one. Multicast is tested BEFORE locally-administered because
+    # the well-known multicast prefixes set both bits - 33:33:.. (IPv6) is both,
+    # and it is not a randomised device.
+    param([string]$Mac)
+    $n = ConvertTo-NtNormalMac $Mac
+    if ($n.Length -lt 2) { return '' }
+    if ($n -eq 'FFFFFFFFFFFF') { return 'Broadcast' }
+    $first = 0
+    try { $first = [Convert]::ToInt32($n.Substring(0, 2), 16) } catch { return '' }
+    if (($first -band 0x01) -ne 0) {
+        if ($n.StartsWith('01005E'))     { return 'Multicast (IPv4)' }
+        if ($n.StartsWith('3333'))       { return 'Multicast (IPv6)' }
+        if ($n.StartsWith('0180C2'))     { return 'Multicast (802.1)' }
+        return 'Multicast'
+    }
+    if (($first -band 0x02) -ne 0) { return 'Private (random) MAC - no vendor' }
+    return ''
+}
+
 function Get-NtOuiVendor {
     # Vendor from the OUI, cached on disk forever because OUI assignments do not
     # change. Network access is best-effort: on an isolated site the cache is
@@ -1680,11 +1814,40 @@ function Get-NtOuiVendor {
 
     $result = @{}
     $needed = [System.Collections.Generic.List[string]]::new()
+
+    # The IEEE table, when it has been downloaded, answers everything offline
+    # and instantly. Its other advantage is LONGEST PREFIX matching: IEEE issues
+    # 24-bit (MA-L), 28-bit (MA-M) and 36-bit (MA-S/IAB) blocks, and the 24-bit
+    # prefix covering a small block belongs to the IEEE itself - which is why
+    # the online service answers "IEEE Registration Authority" for those. Trying
+    # 9, then 7, then 6 hex characters finds the actual sub-assignee.
+    $ieee = Get-NtOuiTable
+
     foreach ($m in @($Macs)) {
         $n = ConvertTo-NtNormalMac $m
         if ($n.Length -lt 6) { continue }
+        if ($result.ContainsKey($n)) { continue }
+
+        # Broadcast, multicast and randomised addresses have no manufacturer.
+        $kind = Get-NtMacKind $n
+        if ($kind) { $result[$n] = $kind; continue }
+
+        if ($ieee) {
+            $hit = ''
+            foreach ($len in @(9, 7, 6)) {
+                if ($n.Length -lt $len) { continue }
+                $p = $n.Substring(0, $len)
+                if ($ieee.ContainsKey($p)) { $hit = $ieee[$p]; break }
+            }
+            if ($hit) { $result[$n] = $hit; continue }
+        }
+
         $oui = $n.Substring(0,6)
         if ($cache.ContainsKey($oui)) { $result[$n] = $cache[$oui]; continue }
+        # With the IEEE data present a miss is authoritative - the prefix really
+        # is unassigned - so do not spend 1.1s online confirming it. Without it,
+        # fall through to the online path exactly as before.
+        if ($ieee) { $result[$n] = 'Unregistered'; continue }
         if ($needed -notcontains $oui) { $needed.Add($oui) }
     }
 

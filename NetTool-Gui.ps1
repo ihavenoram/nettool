@@ -1,4 +1,6 @@
-﻿<#
+﻿# NetTool 1.0.1 - https://ihavenoram.com - https://github.com/ihavenoram/nettool
+# MIT licence, (c) 2026 ihavenoram.com. If you publish something built on this, please credit ihavenoram.com.
+<#
 .SYNOPSIS
     Network Toolkit - technician GUI.
 
@@ -507,9 +509,24 @@ $panelIfTop.Controls.Add($btnIfRefresh)
 
 $lblIfSummary = New-Object System.Windows.Forms.Label
 $lblIfSummary.Location = New-Object System.Drawing.Point(100, 8)
-$lblIfSummary.Size = New-Object System.Drawing.Size(990, 20)
+$lblIfSummary.Size = New-Object System.Drawing.Size(610, 20)
 $lblIfSummary.ForeColor = $NtColorMuted
 $panelIfTop.Controls.Add($lblIfSummary)
+
+# MAC vendor data. Downloading the IEEE registries once replaces the online
+# per-prefix lookup, which is rate limited to roughly one prefix per second and
+# so left most vendors reading "Unknown" on a new site.
+$btnOuiUpdate = New-Object System.Windows.Forms.Button
+$btnOuiUpdate.Text = 'Update MAC vendors'
+$btnOuiUpdate.Location = New-Object System.Drawing.Point(720, 2)
+$btnOuiUpdate.Size = New-Object System.Drawing.Size(140, 26)
+$panelIfTop.Controls.Add($btnOuiUpdate)
+
+$lblOuiStatus = New-Object System.Windows.Forms.Label
+$lblOuiStatus.Location = New-Object System.Drawing.Point(866, 8)
+$lblOuiStatus.Size = New-Object System.Drawing.Size(230, 20)
+$lblOuiStatus.ForeColor = $NtColorMuted
+$panelIfTop.Controls.Add($lblOuiStatus)
 
 $lvInterfaces = New-Object System.Windows.Forms.ListView
 $lvInterfaces.View = 'Details'; $lvInterfaces.FullRowSelect = $true; $lvInterfaces.GridLines = $true
@@ -1101,6 +1118,20 @@ $timer.Add_Tick({
                 $lblStatus.Text = 'Sweep complete.'
             }
         }
+        'oui' {
+            Update-NtOuiStatusLabel
+            if ($result.Ok) {
+                # A PARTIAL download must read as partial. Silently calling it a
+                # success would leave vendors unresolved with no explanation.
+                if (@($result.Errors).Count -gt 0) {
+                    $lblStatus.Text = ('MAC vendor data updated with problems: {0} prefixes, but {1}' -f $result.Count, (@($result.Errors) -join '; '))
+                } else {
+                    $lblStatus.Text = ('MAC vendor data updated - {0:N0} prefixes. Lookups are now offline and instant.' -f $result.Count)
+                }
+            } else {
+                $lblStatus.Text = ('MAC vendor update failed: {0}' -f (@($result.Errors) -join '; '))
+            }
+        }
         'routes' {
             $lvRoutes.Items.Clear()
             foreach ($route in @($result.data.Routes)) {
@@ -1405,6 +1436,26 @@ $btnCaptureB.Add_Click({
         param($NtArgs, $Sync)
         $after = New-NtStateSnapshot -Targets $NtArgs.Targets -Label 'B (after change)' -Shared $Sync
         return (Compare-NtStateSnapshot -Before $NtArgs.Before -After $after)
+    }
+})
+
+function Update-NtOuiStatusLabel {
+    $age = Get-NtOuiTableAgeDays
+    if ($age -lt 0) {
+        $lblOuiStatus.Text = 'MAC vendors: online lookup only'
+    } elseif ($age -gt 180) {
+        $lblOuiStatus.Text = ('MAC vendor data {0} days old' -f $age)
+    } else {
+        $lblOuiStatus.Text = ('MAC vendor data {0} day(s) old' -f $age)
+    }
+}
+
+$btnOuiUpdate.Add_Click({
+    if ($script:Sync.Running) { return }
+    $lblStatus.Text = 'Downloading IEEE MAC vendor registries (about 5 MB, once)...'
+    Start-NtWork -Kind 'oui' -Arguments @{} -Body {
+        param($NtArgs, $Sync)
+        Update-NtOuiTable -Shared $Sync -Progress { param($m) $Sync.Status = [string]$m }
     }
 })
 
@@ -1858,6 +1909,7 @@ if (-not (Test-NtElevated)) {
 # reads as a broken tool. Paying it here instead means the window is responsive
 # the moment it is drawn.
 try { $null = Get-NtLocalContext } catch { }
+try { Update-NtOuiStatusLabel } catch { }
 
 [void]$form.ShowDialog()
 $form.Dispose()

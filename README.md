@@ -8,10 +8,10 @@ From [ihavenoram.com](https://ihavenoram.com): field notes for ADHD techs runnin
 
 ## Download
 
-Grab the latest zip from **[Releases](../../releases/latest)**. The SHA-256 checksum is in the release notes and in the `.sha256` file beside the zip:
+Grab **`nettool.zip`** from **[Releases](../../releases/latest)**. It holds one folder, `nettool\`, with only what runs: the scripts and a `.cmd` launcher for each. Copy that folder to the PC or server (for example `C:\temp\nettool`); this README and the docs stay here on GitHub. The SHA-256 checksum is in the release notes and in the `.sha256` file beside the zip:
 
 ```powershell
-Get-FileHash .\NetTool.zip -Algorithm SHA256
+Get-FileHash .\nettool.zip -Algorithm SHA256
 ```
 
 ## Run it
@@ -20,13 +20,7 @@ Double-click **`Launch-NetTool.cmd`** (it starts PowerShell with `-STA`, which W
 
 Type a device into **Target** and press **Check device**. Leave **Neighbour (auto)** blank: the tool finds a host on the target's network to compare against when it needs one. Ranges and CIDRs go to **Sweep**.
 
-**In ScreenConnect Backstage**, build one self-contained file first and carry that instead:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File Build-NetToolSingleFile.ps1
-```
-
-That writes `build\NetTool-Standalone.ps1`. Copy it to the machine and run it with `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File NetTool-Standalone.ps1`.
+**In ScreenConnect Backstage**, copy the whole `nettool` folder to the machine and run `Launch-NetTool.cmd` there. (If you'd rather carry a single script, `Build-NetToolSingleFile.ps1` in this repo builds one; it isn't in the download.) Copy it to the machine and run it with `powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File NetTool-Standalone.ps1`.
 
 ## What it's good at
 
@@ -53,7 +47,7 @@ Copy `profiles\_template.json` to `profiles\<site>.json` and fill in what you kn
 | `NetTool-Gui.ps1` | The GUI and background workers |
 | `NetTool.Helpers.ps1` | All the diagnostic logic. Functions only, no side effects at load |
 | `NetTool_HTML_Report.ps1` / `Launch-NetTool-Report.cmd` | Turn an exported JSON report into one HTML file |
-| `Build-NetToolSingleFile.ps1` | Builds the one-file copy for Backstage |
+| `Build-NetToolSingleFile.ps1` | Repo only, not in the download: builds a one-file copy if you'd rather carry a single script |
 | `profiles\_template.json` | Documented blank site profile |
 | `docs/TECHNICAL.md` | The full reference |
 

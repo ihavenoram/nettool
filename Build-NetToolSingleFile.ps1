@@ -1,4 +1,6 @@
-﻿<#
+﻿# NetTool 1.0.1 - https://ihavenoram.com - https://github.com/ihavenoram/nettool
+# MIT licence, (c) 2026 ihavenoram.com. If you publish something built on this, please credit ihavenoram.com.
+<#
 .SYNOPSIS
     Generates a single self-contained NetTool-Standalone.ps1.
 
